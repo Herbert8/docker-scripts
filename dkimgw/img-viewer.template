@@ -41,7 +41,7 @@
     mark { background: #ffe58f; padding: 0 2px; }
   </style>
   <!-- 这个就是你要替换的占位符 -->
-  <script id="embeddedJson" type="application/json">__DOCKER_INSPECT_JSON_PLACEHOLDER__</script>
+  <script id="embeddedJson" type="application/json">__DOCKER_IMAGE_INSPECT_PLACEHOLDER__</script>
 </head>
 <body>
   <h1>Docker Inspect JSON Viewer</h1>
@@ -90,7 +90,7 @@
       if (!el) return false;
       const text = (el.textContent || '').trim();
       // 如果还是占位符，说明你还没替换
-      if (!text || text === '__DOCKER_INSPECT_JSON_PLACEHOLDER__') return false;
+      if (!text || text === '__DOCKER_IMAGE_INSPECT_PLACEHOLDER__') return false;
       try {
         const data = JSON.parse(text);
         if (Array.isArray(data)) {
