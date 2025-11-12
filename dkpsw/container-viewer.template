@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Docker Container Inspect Viewer</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 20px;
+      background: #f6f6f6;
+    }
+    h1 { font-size: 20px; margin-bottom: 10px; }
+    .uploader, .search-box { margin-bottom: 12px; }
+    .search-input { width: 280px; padding: 6px 8px; font-size: 13px; }
+
+    table { width: 100%; border-collapse: collapse; background: #fff; table-layout: fixed; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; vertical-align: top; font-size: 13px; word-break: break-all; }
+    th { background: #f0f0f0; text-align: left; cursor: pointer; user-select: none; }
+    th.sortable:hover { background: #e6e6e6; }
+
+    .small { font-size: 12px; color: #666; }
+    #status.load-success { color: #067d00; font-weight: 600; }
+    #status.load-failed { color: #b00020; font-weight: 600; }
+
+    .dim { color: #888; font-size: 12px; }
+
+    th:nth-child(1), td:nth-child(1) { width: 14%; }
+    th:nth-child(2), td:nth-child(2) { width: 21%; }
+    th:nth-child(3), td:nth-child(3) { width: 20%; }
+    th:nth-child(4), td:nth-child(4) { width: 15%; }
+    th:nth-child(5), td:nth-child(5) { width: 15%; }
+    th:nth-child(6), td:nth-child(6) { width: 15%; }
+
+    .sort-indicator { margin-left: 4px; font-size: 11px; color: #555; }
+
+    .container-name { font-weight: 600; display: block; margin-bottom: 4px; }
+    .subline { display: block; font-size: 12px; color: #666; margin-bottom: 2px; }
+
+    .image-badge {
+      display: inline-block;
+      background: #eef2ff;
+      border: 1px solid #d4d4ff;
+      border-radius: 3px;
+      padding: 2px 6px;
+      font-size: 12px;
+      margin-right: 4px;
+      margin-bottom: 2px;
+    }
+    .port-badge {
+      display: inline-block;
+      background: #fff7e6;
+      border: 1px solid #ffd591;
+      border-radius: 3px;
+      padding: 2px 6px;
+      margin: 2px 6px 2px 0;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .mount-row {
+      background: #fafafa;
+    }
+    .mount-list {
+      margin: 4px 0 0 0;
+      padding-left: 16px;
+    }
+    .mount-item {
+      margin-bottom: 4px;
+      font-size: 12px;
+    }
+    .mount-btn {
+      display: inline-block;
+      background: #fff1f0;
+      border: 1px solid #ffa39e;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 12px;
+      cursor: pointer;
+      margin-top: 4px;
+    }
+    .mount-btn:hover {
+      background: #ffe1de;
+    }
+    mark { background: #ffe58f; padding: 0 2px; }
+  </style>
+  <!-- 占位符 -->
+  <script id="embeddedJson" type="application/json">__DOCKER_CONTAINER_INSPECT_PLACEHOLDER__</script>
+</head>
+<body>
+  <h1>Docker Container Inspect Viewer</h1>
+  <div class="uploader">
+    <input type="file" id="fileInput" accept=".json,application/json" />
+  </div>
+  <div class="search-box" style="display:none;" id="searchBox">
+    <input type="text" id="searchInput" class="search-input" placeholder="输入关键字过滤，支持ID/名称/镜像/compose/状态/端口/挂载/时间..." />
+  </div>
+  <div id="status" class="small">请先选择 docker inspect 的 JSON，或者替换本页占位符。</div>
+  <table id="resultTable" style="margin-top: 12px; display:none;">
+    <thead>
+      <tr>
+        <th class="sortable" data-sort-key="id">容器ID <span class="sort-indicator" data-indicator="id"></span></th>
+        <th class="sortable" data-sort-key="name">容器名称 <span class="sort-indicator" data-indicator="name"></span></th>
+        <th class="sortable" data-sort-key="image">镜像 <span class="sort-indicator" data-indicator="image"></span></th>
+        <th class="sortable" data-sort-key="status">状态 <span class="sort-indicator" data-indicator="status"></span></th>
+        <th class="sortable" data-sort-key="ports">端口 <span class="sort-indicator" data-indicator="ports"></span></th>
+        <th class="sortable" data-sort-key="created">创建时间 <span class="sort-indicator" data-indicator="created"></span></th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const status = document.getElementById('status');
+    const table = document.getElementById('resultTable');
+    const tbody = table.querySelector('tbody');
+    const headers = table.querySelectorAll('th.sortable');
+    const searchBox = document.getElementById('searchBox');
+    const searchInput = document.getElementById('searchInput');
+
+    let currentData = [];
+    let currentSort = { key: null, dir: 'asc' };
+    let currentQuery = '';
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const ok = tryLoadEmbeddedJson();
+      if (!ok) {
+        // 初始状态
+      }
+    });
+
+    function tryLoadEmbeddedJson() {
+      const el = document.getElementById('embeddedJson');
+      if (!el) return false;
+      const text = (el.textContent || '').trim();
+      if (!text || text === '__DOCKER_CONTAINER_INSPECT_PLACEHOLDER__') return false;
+      try {
+        const data = JSON.parse(text);
+        if (Array.isArray(data)) {
+          currentData = data.map(raw => normalizeContainer(raw));
+          renderFilteredAndSorted();
+          table.style.display = '';
+          searchBox.style.display = '';
+          status.textContent = `已加载内置 docker inspect 数据，共 ${data.length} 条容器。`;
+          status.classList.add('load-success');
+          return true;
+        }
+      } catch (e) {
+        console.warn('内置 JSON 解析失败', e);
+        status.textContent = '内置 JSON 解析失败，请手动选择文件。';
+        status.classList.add('load-failed');
+      }
+      return false;
+    }
+
+    fileInput.addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = evt => {
+        try {
+          const text = evt.target.result;
+          const data = JSON.parse(text);
+          if (!Array.isArray(data)) throw new Error('JSON 顶层不是数组');
+          currentData = data.map(raw => normalizeContainer(raw));
+          renderFilteredAndSorted();
+          table.style.display = '';
+          searchBox.style.display = '';
+          status.textContent = `已加载文件：${file.name}，共 ${data.length} 条容器。`;
+          status.classList.remove('load-failed');
+          status.classList.add('load-success');
+        } catch (err) {
+          console.error(err);
+          status.textContent = '解析失败：' + err.message;
+          status.classList.remove('load-success');
+          status.classList.add('load-failed');
+          table.style.display = 'none';
+        }
+      };
+      reader.readAsText(file, 'utf-8');
+    });
+
+    searchInput.addEventListener('input', () => {
+      currentQuery = searchInput.value.trim();
+      renderFilteredAndSorted();
+    });
+
+    headers.forEach(th => {
+      th.addEventListener('click', () => {
+        const key = th.getAttribute('data-sort-key');
+        if (!key) return;
+        if (currentSort.key === key) {
+          currentSort.dir = currentSort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          currentSort.key = key;
+          currentSort.dir = 'asc';
+        }
+        renderFilteredAndSorted();
+        updateSortIndicators();
+      });
+    });
+
+    function renderFilteredAndSorted() {
+      const q = currentQuery.toLowerCase();
+      let filtered = currentData;
+      if (q) {
+        filtered = currentData.filter(item => {
+          const haystack = buildSearchText(item).toLowerCase();
+          return haystack.includes(q);
+        });
+      }
+      if (currentSort.key) {
+        filtered = [...filtered].sort((a, b) => compareByKey(a, b, currentSort.key, currentSort.dir));
+      }
+      renderTable(filtered, currentQuery);
+    }
+
+    function normalizeContainer(item) {
+      const id = item.Id || '';
+      const shortId = id ? id.slice(0, 12) : '';
+      const name = (item.Name || '').replace(/^\//, '');
+
+      const labels = item.Config && item.Config.Labels ? item.Config.Labels : {};
+      const composeProject = labels['com.docker.compose.project'] || '';
+      const composeService = labels['com.docker.compose.service'] || '';
+
+      const imageFromConfig = item.Config && item.Config.Image ? item.Config.Image : '';
+      const imageId = item.Image || '';
+      const imageDisplay = imageFromConfig || imageId;
+
+      const state = item.State || {};
+      const status = state.Status || '';
+      const startedAt = state.StartedAt || '';
+      const finishedAt = state.FinishedAt || '';
+
+      const created = item.Created || '';
+      const createdTs = parseToTimestamp(created);
+
+      const portBindings = (item.HostConfig && item.HostConfig.PortBindings) ? item.HostConfig.PortBindings : {};
+      const portsArr = [];
+      if (portBindings && typeof portBindings === 'object') {
+        Object.keys(portBindings).forEach(containerPort => {
+          const bindings = portBindings[containerPort];
+          if (Array.isArray(bindings)) {
+            bindings.forEach(b => {
+              const hostIp = b.HostIp || '0.0.0.0';
+              const hostPort = b.HostPort || '';
+              portsArr.push(`${hostIp}:${hostPort}->${containerPort}`);
+            });
+          }
+        });
+      } else {
+        const exposed = item.Config && item.Config.ExposedPorts ? item.Config.ExposedPorts : {};
+        if (exposed && typeof exposed === 'object') {
+          Object.keys(exposed).forEach(p => portsArr.push(p));
+        }
+      }
+
+      let networks = [];
+      const ns = item.NetworkSettings && item.NetworkSettings.Networks;
+      if (ns && typeof ns === 'object') {
+        networks = Object.keys(ns);
+      }
+
+      let startCmd = '';
+      if (item.Path) {
+        startCmd = item.Path;
+        if (Array.isArray(item.Args) && item.Args.length > 0) {
+          startCmd += ' ' + item.Args.join(' ');
+        }
+      } else if (item.Config && Array.isArray(item.Config.Cmd)) {
+        startCmd = item.Config.Cmd.join(' ');
+      }
+
+      const restartPolicy = item.HostConfig && item.HostConfig.RestartPolicy ? item.HostConfig.RestartPolicy : {};
+      const restartName = restartPolicy.Name || '';
+
+      const mounts = Array.isArray(item.Mounts) ? item.Mounts : [];
+      const binds = item.HostConfig && Array.isArray(item.HostConfig.Binds) ? item.HostConfig.Binds : [];
+      const mountDisplays = [];
+
+      // structured mounts
+      mounts.forEach(m => {
+        const type = m.Type || '';
+        const src = m.Source || '';
+        const dst = m.Destination || '';
+        const mode = m.Mode || '';
+        if (type === 'bind' || type === 'volume') {
+          mountDisplays.push(`${src} → ${dst}${mode ? ' ('+mode+')' : ''}`);
+        } else {
+          mountDisplays.push(`${src} → ${dst}`);
+        }
+      });
+      // binds
+      binds.forEach(b => {
+        const parts = b.split(':');
+        const src = parts[0] || '';
+        const dst = parts[1] || '';
+        const mode = parts[2] || '';
+        mountDisplays.push(`${src} → ${dst}${mode ? ' ('+mode+')' : ''}`);
+      });
+
+      const memoryLimit = item.HostConfig && item.HostConfig.Memory ? item.HostConfig.Memory : 0;
+      const nanoCpus = item.HostConfig && item.HostConfig.NanoCpus ? item.HostConfig.NanoCpus : 0;
+
+      return {
+        raw: item,
+        id,
+        shortId,
+        name,
+        composeProject,
+        composeService,
+        imageDisplay,
+        imageId,
+        status,
+        startedAt,
+        finishedAt,
+        created,
+        createdTs,
+        ports: portsArr,
+        networks,
+        startCmd,
+        restartName,
+        mountDisplays,
+        memoryLimit,
+        nanoCpus
+      };
+    }
+
+    function buildSearchText(item) {
+      return [
+        item.id,
+        item.name,
+        item.composeProject,
+        item.composeService,
+        item.imageDisplay,
+        item.imageId,
+        item.status,
+        item.ports.join(' '),
+        item.mountDisplays.join(' '),
+        item.networks.join(' '),
+        item.startCmd,
+        item.restartName,
+        item.created,
+        item.startedAt,
+        item.finishedAt
+      ].join(' ');
+    }
+
+    function renderTable(items, query='') {
+      tbody.innerHTML = '';
+      items.forEach((item, index) => {
+        const tr = document.createElement('tr');
+        tr.setAttribute('data-row', index);
+
+        const idHtml = `${highlightMatch(item.shortId, query)}<br><span class="dim">${highlightMatch(item.id, query)}</span>`;
+
+        const nameHtml = item.name ? highlightMatch(item.name, query) : '<span class="dim">（无名称）</span>';
+        const subParts = [];
+        if (item.composeProject) subParts.push(`项目: ${highlightMatch(item.composeProject, query)}`);
+        if (item.composeService) subParts.push(`服务: ${highlightMatch(item.composeService, query)}`);
+        if (item.networks.length) subParts.push(`网络: ${highlightMatch(item.networks[0], query)}`);
+        const nameSubHtml = subParts.length ? `<span class="subline">${subParts.join(' · ')}</span>` : '';
+
+        const imageLine1 = item.imageDisplay ? highlightMatch(item.imageDisplay, query) : '<span class="dim">未知镜像</span>';
+        const imageLine2 = item.imageId ? `<br><span class="dim">${highlightMatch(item.imageId, query)}</span>` : '';
+        const cmdLine = item.startCmd ? `<span class="subline">Cmd: ${highlightMatch(item.startCmd, query)}</span>` : '';
+
+        let statusHtml = highlightMatch(item.status, query);
+        const timeInfo = item.status === 'running'
+          ? item.startedAt
+          : item.finishedAt || item.startedAt;
+        if (timeInfo) {
+          const t = splitDateTime(timeInfo);
+          statusHtml += `<br><span class="dim">${highlightMatch(t.date, query)} ${highlightMatch(t.time, query)}</span>`;
+        }
+        if (item.restartName && item.restartName !== 'no') {
+          statusHtml += `<br><span class="dim">策略: ${highlightMatch(item.restartName, query)}</span>`;
+        }
+        const limitTexts = [];
+        if (item.memoryLimit && item.memoryLimit > 0) {
+          limitTexts.push(`内存: ${formatBytes(item.memoryLimit)}`);
+        }
+        if (item.nanoCpus && item.nanoCpus > 0) {
+          const cpus = item.nanoCpus / 1e9;
+          limitTexts.push(`CPU: ${cpus}`);
+        }
+        if (limitTexts.length) {
+          statusHtml += `<br><span class="dim">${limitTexts.join(' · ')}</span>`;
+        }
+
+        let portsHtml = '';
+        if (item.ports.length > 0) {
+          portsHtml = item.ports.map(p => {
+            return `<span class="port-badge" title="${escapeHtml(p)}">${highlightMatch(p, query)}</span>`;
+          }).join('');
+        } else {
+          portsHtml = '<span class="dim">无</span>';
+        }
+        // 挂载按钮
+        if (item.mountDisplays.length > 0) {
+          portsHtml += `<br><span class="mount-btn" data-toggle-mount="${index}">挂载(${item.mountDisplays.length})</span>`;
+        }
+
+        const createdParts = splitDateTime(item.created);
+        const createdHtml = `${highlightMatch(createdParts.date, query)}<br><span class="dim">${highlightMatch(createdParts.time, query)}</span>`;
+
+        tr.innerHTML = `
+          <td>${idHtml}</td>
+          <td>
+            <span class="container-name" title="${escapeHtml(item.name)}">${nameHtml}</span>
+            ${nameSubHtml}
+          </td>
+          <td>
+            <span class="image-badge">${imageLine1}</span>
+            ${imageLine2}
+            ${cmdLine}
+          </td>
+          <td>${statusHtml}</td>
+          <td>${portsHtml}</td>
+          <td>${createdHtml}</td>
+        `;
+        tbody.appendChild(tr);
+
+        // 挂载详情行
+        const mountTr = document.createElement('tr');
+        mountTr.className = 'mount-row';
+        mountTr.style.display = 'none';
+        mountTr.setAttribute('data-mount-row', index);
+        const mountTd = document.createElement('td');
+        mountTd.colSpan = 6;
+        if (item.mountDisplays.length > 0) {
+          mountTd.innerHTML = `<strong>挂载信息：</strong><ul class="mount-list">${
+            item.mountDisplays.map(m => `<li class="mount-item">${highlightMatch(m, query)}</li>`).join('')
+          }</ul>`;
+        } else {
+          mountTd.innerHTML = `<strong>挂载信息：</strong><span class="dim">无</span>`;
+        }
+        mountTr.appendChild(mountTd);
+        tbody.appendChild(mountTr);
+      });
+
+      // 挂载折叠事件
+      tbody.querySelectorAll('[data-toggle-mount]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const idx = btn.getAttribute('data-toggle-mount');
+          const mountRow = tbody.querySelector(`tr[data-mount-row="${idx}"]`);
+          if (!mountRow) return;
+          const isHidden = mountRow.style.display === 'none';
+          mountRow.style.display = isHidden ? '' : 'none';
+        });
+      });
+    }
+
+    function updateSortIndicators() {
+      const indicators = document.querySelectorAll('.sort-indicator');
+      indicators.forEach(el => el.textContent = '');
+      if (!currentSort.key) return;
+      const currentInd = document.querySelector(`.sort-indicator[data-indicator="${currentSort.key}"]`);
+      if (currentInd) currentInd.textContent = currentSort.dir === 'asc' ? '↑' : '↓';
+    }
+
+    function compareByKey(a, b, key, dir) {
+      let v1, v2;
+      switch (key) {
+        case 'id': v1 = a.id || ''; v2 = b.id || ''; return stringCompare(v1, v2, dir);
+        case 'name': v1 = a.name || ''; v2 = b.name || ''; return stringCompare(v1, v2, dir);
+        case 'image': v1 = a.imageDisplay || ''; v2 = b.imageDisplay || ''; return stringCompare(v1, v2, dir);
+        case 'status': v1 = a.status || ''; v2 = b.status || ''; return stringCompare(v1, v2, dir);
+        case 'ports': v1 = (a.ports || []).join(','); v2 = (b.ports || []).join(','); return stringCompare(v1, v2, dir);
+        case 'created': v1 = a.createdTs || 0; v2 = b.createdTs || 0; return numberCompare(v1, v2, dir);
+        default: return 0;
+      }
+    }
+
+    function stringCompare(a, b, dir) {
+      const res = a.localeCompare(b);
+      return dir === 'asc' ? res : -res;
+    }
+    function numberCompare(a, b, dir) {
+      const res = a - b;
+      return dir === 'asc' ? res : -res;
+    }
+
+    function splitDateTime(isoStr) {
+      if (!isoStr) return { date: '', time: '' };
+      const d = new Date(isoStr);
+      if (isNaN(d)) {
+        const parts = isoStr.split('T');
+        return {
+          date: parts[0] || '',
+          time: (parts[1] || '').replace('Z', '')
+        };
+      }
+      const pad = n => String(n).padStart(2, '0');
+      const year = d.getFullYear();
+      const month = pad(d.getMonth() + 1);
+      const day = pad(d.getDate());
+      const hours = pad(d.getHours());
+      const minutes = pad(d.getMinutes());
+      const seconds = pad(d.getSeconds());
+
+      const offsetMin = -d.getTimezoneOffset();
+      const sign = offsetMin >= 0 ? '+' : '-';
+      const offsetHours = Math.floor(Math.abs(offsetMin) / 60);
+      const offsetMinutes = Math.abs(offsetMin) % 60;
+      const tzString = `UTC${sign}${pad(offsetHours)}:${pad(offsetMinutes)}`;
+
+      return {
+        date: `${year}-${month}-${day}`,
+        time: `${hours}:${minutes}:${seconds} (${tzString})`
+      };
+    }
+
+    function parseToTimestamp(isoStr) {
+      if (!isoStr) return 0;
+      const d = new Date(isoStr);
+      if (isNaN(d)) return 0;
+      return d.getTime();
+    }
+
+    function formatBytes(bytes) {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      const value = bytes / Math.pow(k, i);
+      return value.toFixed(value >= 10 ? 1 : 2) + ' ' + sizes[i];
+    }
+
+    function escapeHtml(str) {
+      if (typeof str !== 'string') return str;
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function highlightMatch(str, query) {
+      if (str == null) return '';
+      const escaped = escapeHtml(String(str));
+      if (!query) return escaped;
+      const q = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const reg = new RegExp(q, 'ig');
+      return escaped.replace(reg, m => `<mark>${m}</mark>`);
+    }
+  </script>
+</body>
+</html>
