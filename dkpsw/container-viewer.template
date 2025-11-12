@@ -56,10 +56,10 @@
       font-size: 12px;
       white-space: nowrap;
     }
-    .mount-row {
+    .mount-row, .cmd-row {
       background: #fafafa;
     }
-    .mount-list {
+    .mount-list, .cmd-box {
       margin: 4px 0 0 0;
       padding-left: 16px;
     }
@@ -67,7 +67,7 @@
       margin-bottom: 4px;
       font-size: 12px;
     }
-    .mount-btn {
+    .mount-btn, .cmd-btn {
       display: inline-block;
       background: #fff1f0;
       border: 1px solid #ffa39e;
@@ -76,8 +76,9 @@
       font-size: 12px;
       cursor: pointer;
       margin-top: 4px;
+      margin-right: 4px;
     }
-    .mount-btn:hover {
+    .mount-btn:hover, .cmd-btn:hover {
       background: #ffe1de;
     }
     mark { background: #ffe58f; padding: 0 2px; }
@@ -261,6 +262,7 @@
         networks = Object.keys(ns);
       }
 
+      // 启动命令
       let startCmd = '';
       if (item.Path) {
         startCmd = item.Path;
@@ -278,19 +280,12 @@
       const binds = item.HostConfig && Array.isArray(item.HostConfig.Binds) ? item.HostConfig.Binds : [];
       const mountDisplays = [];
 
-      // structured mounts
       mounts.forEach(m => {
-        const type = m.Type || '';
         const src = m.Source || '';
         const dst = m.Destination || '';
         const mode = m.Mode || '';
-        if (type === 'bind' || type === 'volume') {
-          mountDisplays.push(`${src} → ${dst}${mode ? ' ('+mode+')' : ''}`);
-        } else {
-          mountDisplays.push(`${src} → ${dst}`);
-        }
+        mountDisplays.push(`${src} → ${dst}${mode ? ' ('+mode+')' : ''}`);
       });
-      // binds
       binds.forEach(b => {
         const parts = b.split(':');
         const src = parts[0] || '';
@@ -363,8 +358,8 @@
 
         const imageLine1 = item.imageDisplay ? highlightMatch(item.imageDisplay, query) : '<span class="dim">未知镜像</span>';
         const imageLine2 = item.imageId ? `<br><span class="dim">${highlightMatch(item.imageId, query)}</span>` : '';
-        const cmdLine = item.startCmd ? `<span class="subline">Cmd: ${highlightMatch(item.startCmd, query)}</span>` : '';
 
+        // 状态
         let statusHtml = highlightMatch(item.status, query);
         const timeInfo = item.status === 'running'
           ? item.startedAt
@@ -396,9 +391,14 @@
         } else {
           portsHtml = '<span class="dim">无</span>';
         }
-        // 挂载按钮
         if (item.mountDisplays.length > 0) {
           portsHtml += `<br><span class="mount-btn" data-toggle-mount="${index}">挂载(${item.mountDisplays.length})</span>`;
+        }
+
+        // 镜像列里放“命令”按钮
+        let cmdBtnHtml = '';
+        if (item.startCmd) {
+          cmdBtnHtml = `<div><span class="cmd-btn" data-toggle-cmd="${index}">Cmd</span><div>`;
         }
 
         const createdParts = splitDateTime(item.created);
@@ -413,7 +413,7 @@
           <td>
             <span class="image-badge">${imageLine1}</span>
             ${imageLine2}
-            ${cmdLine}
+            ${cmdBtnHtml}
           </td>
           <td>${statusHtml}</td>
           <td>${portsHtml}</td>
@@ -437,16 +437,39 @@
         }
         mountTr.appendChild(mountTd);
         tbody.appendChild(mountTr);
+
+        // 命令详情行
+        const cmdTr = document.createElement('tr');
+        cmdTr.className = 'cmd-row';
+        cmdTr.style.display = 'none';
+        cmdTr.setAttribute('data-cmd-row', index);
+        const cmdTd = document.createElement('td');
+        cmdTd.colSpan = 6;
+        if (item.startCmd) {
+          cmdTd.innerHTML = `<strong>启动命令：</strong><div class="cmd-box">${highlightMatch(item.startCmd, query)}</div>`;
+        } else {
+          cmdTd.innerHTML = `<strong>启动命令：</strong><span class="dim">无</span>`;
+        }
+        cmdTr.appendChild(cmdTd);
+        tbody.appendChild(cmdTr);
       });
 
-      // 挂载折叠事件
+      // 挂载折叠
       tbody.querySelectorAll('[data-toggle-mount]').forEach(btn => {
         btn.addEventListener('click', () => {
           const idx = btn.getAttribute('data-toggle-mount');
           const mountRow = tbody.querySelector(`tr[data-mount-row="${idx}"]`);
           if (!mountRow) return;
-          const isHidden = mountRow.style.display === 'none';
-          mountRow.style.display = isHidden ? '' : 'none';
+          mountRow.style.display = mountRow.style.display === 'none' ? '' : 'none';
+        });
+      });
+      // 命令折叠
+      tbody.querySelectorAll('[data-toggle-cmd]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const idx = btn.getAttribute('data-toggle-cmd');
+          const cmdRow = tbody.querySelector(`tr[data-cmd-row="${idx}"]`);
+          if (!cmdRow) return;
+          cmdRow.style.display = cmdRow.style.display === 'none' ? '' : 'none';
         });
       });
     }

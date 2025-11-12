@@ -101,7 +101,7 @@
 或：
 
 ```html
-<script id="embeddedJson" type="application/json">__DOCKER_INSPECT_JSON_PLACEHOLDER__</script>
+<script id="embeddedJson" type="application/json">__DOCKER_IMAGE_INSPECT_PLACEHOLDER__</script>
 ```
 
 执行脚本时会被替换成实际 JSON。
