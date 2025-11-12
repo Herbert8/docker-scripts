@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
-BASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REAL_SCRIPT_FILE=$(realpath "${BASH_SOURCE[0]}")
+BASE_DIR=$(cd "$(dirname "$REAL_SCRIPT_FILE")" && pwd)
 readonly BASE_DIR
 
 if ! IMG_INFO_LIST=$(docker inspect $(docker images -qa | sort -u)); then
